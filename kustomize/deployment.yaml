@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cert-backup
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cert-backup
+  template:
+    metadata:
+      labels:
+        app: cert-backup
+    spec:
+      serviceAccountName: cert-backup
+      containers:
+        - name: external-dns
+          image: ghcr.io/mgazza/cert-backup:latest
+          readinessProbe:
+            httpGet:
+              port: 8081
+              path: /readyz
+          livenessProbe:
+            httpGet:
+              port: 8081
+              path: /healthz
