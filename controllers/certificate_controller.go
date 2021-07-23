@@ -68,7 +68,6 @@ type Storage interface {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.8.3/pkg/reconcile
 func (r *CertificateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
 
 	cert := &certmanageriov1.Certificate{}
 	// your logic here
@@ -77,12 +76,13 @@ func (r *CertificateReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// if we can't load the cert then we need to stop processing it
 		return ctrl.Result{}, err
 	}
-
 	secret := &v1.Secret{}
 	secretFullName := types.NamespacedName{
 		Namespace: req.NamespacedName.Namespace,
 		Name:      cert.Spec.SecretName,
 	}
+	logger := log.FromContext(ctx).WithValues("secret", secretFullName)
+
 	err = r.Get(ctx, secretFullName, secret)
 	if err != nil && !k8serrors.IsNotFound(err) {
 		return ctrl.Result{Requeue: true}, errors.Wrap(err, fmt.Sprintf("error getting secret %s", secretFullName))
@@ -92,10 +92,11 @@ func (r *CertificateReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	secretValid, err := verifySecret(secret)
 	if err != nil {
 		// some unknown error verifying the secret continue
-		logger.Error(err, "error verifying secret", "secret", secretFullName)
+		logger.Error(err, "error verifying secret")
 	}
 
 	if secretValid {
+		logger.Info("backing up secret to storage")
 		// update the Storage one
 		b, err := json.Marshal(secret)
 		if err != nil {
@@ -108,11 +109,12 @@ func (r *CertificateReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{Requeue: true}, errors.Wrap(err, "error uploading secret to storage")
 		}
 		// were done now
+		logger.Info("successfully backed-up")
 		return ctrl.Result{}, nil
 	}
 
 	// the (existing?) secret isn't valid
-
+	logger.Info("looking for secret on storage")
 	// download the Storage secret
 	buff := aws.NewWriteAtBuffer([]byte{})
 	err = r.Storage.Download(fileName, buff)
@@ -145,6 +147,7 @@ func (r *CertificateReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			// retry
 			return ctrl.Result{Requeue: true}, errors.Wrap(err, fmt.Sprintf("error restoring secret %s", secretFullName))
 		}
+		logger.Info("successfully restored")
 		return ctrl.Result{}, nil
 	}
 
